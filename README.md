@@ -265,23 +265,99 @@ Kafka guarantees **in-order delivery per partition**, but failover can cause mes
 
 ---
 
-### Producing and Consuming Messages in Order (Sequential Processing)
+### Kafka Configuration for Ordered, Sequential Processing
 
-Kafka guarantees **in-order delivery per partition**, which can be leveraged for sequential processing of messages.
-
----
-
-#### Producer Configuration
-
-To ensure messages are produced in order:
+Kafka guarantees **in-order delivery per partition**. The following configuration ensures **sequential message production and consumption**, failover handling, idempotence, and transactional guarantees, all in one setup.
 
 ```properties
-# Enable idempotence to prevent duplicates on retries
-enable.idempotence=true
+# -----------------------------
+# Producer Settings
+# -----------------------------
+enable.idempotence=true               # Prevent duplicates per partition
+acks=all                              # Wait for all in-sync replicas to acknowledge
+transactional.id=my-transaction       # Exactly-once across multiple partitions/topics
+max.in.flight.requests.per.connection=1  # Maintain strict order
+batch.size=16384                       # Batch multiple messages for throughput
+linger.ms=5                            # Small delay to allow batching
+compression.type=snappy                # Reduce network overhead
+# Use a consistent key (e.g., userId) for related messages to ensure they go to the same partition
 
-# Ensure all replicas acknowledge the message
-acks=all
+# -----------------------------
+# Consumer Settings
+# -----------------------------
+enable.auto.commit=false              # Manual offset commits to prevent duplicates
+max.poll.records=100                  # Fetch multiple messages in a single poll
+fetch.max.wait.ms=500                 # Max wait time to fill batch
+max.partition.fetch.bytes=1048576     # Max data per partition
+session.timeout.ms=30000              # Detect consumer failures quickly
+heartbeat.interval.ms=10000           # Heartbeat to broker to maintain session
 
-# Use a single partition (or a key-based partitioning strategy)
-# so that related messages go to the same partition
+# -----------------------------
+# Broker / Cluster Settings
+# -----------------------------
+replication.factor=3                   # Number of replicas per partition for fault tolerance
+num.partitions=1                       # Single partition for strict global ordering
+min.insync.replicas=2                  # Minimum replicas that must acknowledge a write
+log.retention.ms=604800000             # Retain messages for 7 days
+log.segment.bytes=1073741824           # 1 GB per log segment
+message.max.bytes=10485760             # Max message size 10 MB
+unclean.leader.election.enable=false   # Prevent out-of-sync replicas from becoming leaders
+# Monitor ISR to ensure high availability without losing ordering guarantees
 
+# -----------------------------
+# How It Works for Sequential Processing
+# -----------------------------
+# 1. Producer sends messages with PID + Sequence Number per partition.
+# 2. Broker assigns an offset per partition when messages are appended.
+# 3. On failover:
+#    - Only replicas in ISR can become leader.
+#    - Out-of-sync replicas cannot become leader, preventing message loss or out-of-order delivery.
+# 4. Retries are deduplicated by sequence number, maintaining exactly-once per partition.
+# 5. Consumers read messages in offset order, ensuring sequential processing.
+# 6. Transactions ensure atomic writes across multiple partitions/topics.
+
+# -----------------------------
+# PID + Sequence Number vs Broker Offset vs Consumer Read Order
+# -----------------------------
+# Example for Partition 0
+# +-------------------+-------------------+---------------------+
+# | Producer PID + Seq | Broker Offset     | Consumer Read Order |
+# +-------------------+-------------------+---------------------+
+# | PID=1001, Seq=0   | Offset=0          | Read first          |
+# | PID=1001, Seq=1   | Offset=1          | Read second         |
+# | PID=1001, Seq=2   | Offset=2          | Read third          |
+# | PID=1002, Seq=0   | Offset=3          | Read fourth         |
+# | PID=1002, Seq=1   | Offset=4          | Read fifth          |
+# +-------------------+-------------------+---------------------+
+# Sequence numbers are per producer; offsets are per broker partition.
+# Consumers always read in offset order, preserving message order.
+
+# -----------------------------
+# Producing Messages Sequentially
+# -----------------------------
+# Pseudocode:
+# producer.init_transactions()
+# producer.begin_transaction()
+# for message in messages:         # e.g., 100 messages
+#     producer.send(topic, key=message.key, value=message.value)
+# producer.commit_transaction()    # Commit all messages atomically
+
+# -----------------------------
+# Consuming Messages Sequentially
+# -----------------------------
+# Pseudocode:
+# while True:
+#     records = consumer.poll(timeout_ms=500)
+#     for record in records:
+#         process(record)          # Sequential processing logic
+#     consumer.commit()            # Commit offsets after processing
+
+# -----------------------------
+# Best Practices
+# -----------------------------
+# - Use a single partition or consistent partition key for strict ordering.
+# - Idempotent or transactional producer prevents duplicates.
+# - Manual consumer offset commit ensures reliability.
+# - Disable unclean leader election to avoid out-of-sync leaders.
+# - Monitor ISR size to maintain availability and durability during failover.
+# - Batch messages and use compression to optimize throughput without affecting order.
