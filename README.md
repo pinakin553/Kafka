@@ -191,3 +191,75 @@ Set up alerts for:
 - **Use Case**:
   - Decoupling services in an e-commerce system (order, payment, shipping).
   - Event-driven notifications (user signup triggers welcome email & analytics).
+ 
+### Handling Out-of-Order Messages During Failover
+
+Kafka guarantees **in-order delivery per partition**, but failover can cause messages to be delivered out-of-order if an out-of-sync replica becomes the new leader. To handle this effectively:
+
+#### Key Concepts
+
+- **Sequence Number (`seq`)**
+  - Assigned by the **producer** per partition.
+  - Ensures **idempotence**: broker ignores duplicate messages on retries.
+  - Independent of broker offsets.
+
+- **Offset**
+  - Assigned by the **broker** per partition.
+  - Tracks the **position of a message in the log** for consumers.
+  - Consumers read messages in **offset order**.
+
+- **ISR (In-Sync Replicas)**
+  - Only replicas fully caught up with the leader can become the new leader.
+  - Ensures messages aren’t lost during failover.
+
+- **Transactional Producers (`transactional.id`)**
+  - Guarantees **exactly-once semantics** across multiple partitions/topics.
+  - Works with idempotent producers to maintain order even during failover.
+
+---
+
+#### How It Works
+
+1. Producer sends messages with **PID + Seq #**.  
+2. Broker assigns an **offset** when the message is appended to the log.  
+3. If the **leader fails**:  
+   - Only replicas in **ISR** can become the new leader.  
+   - Out-of-sync replicas are prevented from causing message loss or out-of-order delivery (`unclean.leader.election.enable=false`).  
+4. Producer retries a message after a transient error:  
+   - Broker checks **PID + Seq #**.  
+   - If the message was already written, it is **ignored** (no duplicate).  
+5. Consumers read messages in **offset order**, preserving correct sequence.
+
+---
+
+#### Example: Sequence Number vs Offset
+
+| Partition | Producer | Seq # | Broker Offset | Notes |
+|-----------|----------|-------|---------------|-------|
+| 2         | A        | 0     | 0             | First message appended |
+| 2         | A        | 1     | 1             | Next message |
+| 2         | B        | 0     | 2             | New producer starts seq=0 |
+| 2         | A        | 2     | 3             | Continues sending |
+| 2         | B        | 1     | 4             | Continues sending |
+
+**Explanation:**  
+- Sequence numbers are **per producer per partition** and help the broker detect duplicates.  
+- Offsets are **assigned by the broker** and determine the order seen by consumers.  
+- Even during failover, messages remain **deduplicated and ordered** if idempotence and transactions are used.  
+
+---
+
+#### Practical Config Recommendations
+
+- **Producer Side:**  
+  - `enable.idempotence=true` → Prevent duplicates per partition.  
+  - `transactional.id=<unique_id>` → Exactly-once across multiple partitions/topics.  
+  - `acks=all` and `min.insync.replicas >= 2` → Ensure messages are committed before acknowledgment.  
+
+- **Broker Side:**  
+  - `unclean.leader.election.enable=false` → Prevent out-of-sync leaders.  
+  - Monitor **ISR** size to ensure high availability.  
+
+- **Partitioning Strategy:**  
+  - Keep related messages in the **same partition** to preserve order.  
+
