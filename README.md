@@ -265,9 +265,9 @@ Kafka guarantees **in-order delivery per partition**, but failover can cause mes
 
 ---
 
-### Kafka Configuration for Ordered, Sequential Processing
+### Kafka Configuration & Scenarios for Ordered, Sequential Processing
 
-Kafka guarantees **in-order delivery per partition**. The following configuration ensures **sequential message production and consumption**, failover handling, idempotence, and transactional guarantees, all in one setup.
+Kafka guarantees **in-order delivery per partition**. This README consolidates **producer, consumer, broker settings**, sequential processing examples, failover handling, idempotence, transactions, and common real-world scenarios.
 
 ```properties
 # -----------------------------
@@ -286,11 +286,12 @@ compression.type=snappy                # Reduce network overhead
 # Consumer Settings
 # -----------------------------
 enable.auto.commit=false              # Manual offset commits to prevent duplicates
-max.poll.records=100                  # Fetch multiple messages in a single poll
+max.poll.records=100                  # Fetch multiple messages per poll
 fetch.max.wait.ms=500                 # Max wait time to fill batch
 max.partition.fetch.bytes=1048576     # Max data per partition
 session.timeout.ms=30000              # Detect consumer failures quickly
 heartbeat.interval.ms=10000           # Heartbeat to broker to maintain session
+isolation.level=read_committed        # Ensure consumer reads only committed transactional messages
 
 # -----------------------------
 # Broker / Cluster Settings
@@ -303,34 +304,6 @@ log.segment.bytes=1073741824           # 1 GB per log segment
 message.max.bytes=10485760             # Max message size 10 MB
 unclean.leader.election.enable=false   # Prevent out-of-sync replicas from becoming leaders
 # Monitor ISR to ensure high availability without losing ordering guarantees
-
-# -----------------------------
-# How It Works for Sequential Processing
-# -----------------------------
-# 1. Producer sends messages with PID + Sequence Number per partition.
-# 2. Broker assigns an offset per partition when messages are appended.
-# 3. On failover:
-#    - Only replicas in ISR can become leader.
-#    - Out-of-sync replicas cannot become leader, preventing message loss or out-of-order delivery.
-# 4. Retries are deduplicated by sequence number, maintaining exactly-once per partition.
-# 5. Consumers read messages in offset order, ensuring sequential processing.
-# 6. Transactions ensure atomic writes across multiple partitions/topics.
-
-# -----------------------------
-# PID + Sequence Number vs Broker Offset vs Consumer Read Order
-# -----------------------------
-# Example for Partition 0
-# +-------------------+-------------------+---------------------+
-# | Producer PID + Seq | Broker Offset     | Consumer Read Order |
-# +-------------------+-------------------+---------------------+
-# | PID=1001, Seq=0   | Offset=0          | Read first          |
-# | PID=1001, Seq=1   | Offset=1          | Read second         |
-# | PID=1001, Seq=2   | Offset=2          | Read third          |
-# | PID=1002, Seq=0   | Offset=3          | Read fourth         |
-# | PID=1002, Seq=1   | Offset=4          | Read fifth          |
-# +-------------------+-------------------+---------------------+
-# Sequence numbers are per producer; offsets are per broker partition.
-# Consumers always read in offset order, preserving message order.
 
 # -----------------------------
 # Producing Messages Sequentially
@@ -353,11 +326,64 @@ unclean.leader.election.enable=false   # Prevent out-of-sync replicas from becom
 #     consumer.commit()            # Commit offsets after processing
 
 # -----------------------------
-# Best Practices
+# PID + Sequence Number vs Broker Offset vs Consumer Read Order
 # -----------------------------
-# - Use a single partition or consistent partition key for strict ordering.
-# - Idempotent or transactional producer prevents duplicates.
-# - Manual consumer offset commit ensures reliability.
-# - Disable unclean leader election to avoid out-of-sync leaders.
-# - Monitor ISR size to maintain availability and durability during failover.
-# - Batch messages and use compression to optimize throughput without affecting order.
+# Example for Partition 0
+# +-------------------+-------------------+---------------------+
+# | Producer PID + Seq | Broker Offset     | Consumer Read Order |
+# +-------------------+-------------------+---------------------+
+# | PID=1001, Seq=0   | Offset=0          | Read first          |
+# | PID=1001, Seq=1   | Offset=1          | Read second         |
+# | PID=1001, Seq=2   | Offset=2          | Read third          |
+# | PID=1002, Seq=0   | Offset=3          | Read fourth         |
+# | PID=1002, Seq=1   | Offset=4          | Read fifth          |
+# +-------------------+-------------------+---------------------+
+# Sequence numbers are per producer; offsets are per broker partition.
+# Consumers always read in offset order, preserving message order.
+
+# -----------------------------
+# Common Real-World Scenarios & Best Practices
+# -----------------------------
+
+# 1. Consumer sees the same message twice
+# Reason: Consumer crashes or fails before committing offsets.
+# Solution: Make processing idempotent, commit offsets after processing.
+
+# 2. Messages arrive out-of-order at consumer
+# Reason: Multiple partitions; consumer reads in parallel.
+# Solution: Use a single partition or consistent key for related messages.
+
+# 3. Messages lost during failover
+# Reason: Unclean leader election or insufficient ISR.
+# Solution: unclean.leader.election.enable=false, min.insync.replicas>=2, acks=all.
+
+# 4. Duplicate messages due to producer retries
+# Reason: Non-idempotent producer retries on transient failures.
+# Solution: enable.idempotence=true, use transactions for multi-partition writes.
+
+# 5. Consumer processes messages but app fails
+# Reason: Offsets not committed after processing.
+# Solution: Commit offsets **after successful processing**, use idempotent processing.
+
+# 6. Producer faster than consumer
+# Reason: Consumer fetch batch/processing limits.
+# Solution: Increase consumer parallelism, adjust fetch.min.bytes, max.poll.records, and monitor consumer lag.
+
+# 7. Out-of-order messages after rebalance
+# Reason: Consumer group rebalance reassigns partitions.
+# Solution: Commit offsets frequently, ensure idempotent processing logic.
+
+# 8. Transactional producer partially succeeds
+# Reason: Transaction aborts due to error.
+# Solution: Consumers use isolation.level=read_committed to only read committed messages.
+
+# -----------------------------
+# Best Practices Summary
+# -----------------------------
+# - Use single partition or partition key for ordering.
+# - Enable idempotence and/or transactions for producer.
+# - Commit consumer offsets after processing.
+# - Disable unclean leader election.
+# - Monitor ISR to ensure high availability.
+# - Batch messages and use compression for throughput.
+# - Design consumers to be idempotent to handle duplicates.
