@@ -16,30 +16,90 @@ Apache Kafka is a distributed event streaming platform that follows a publish-su
 - **Rack Aware Cluster**: Ensures high availability and fault tolerance by spreading replicas across different racks.
 - **Kafka Controller**: A special broker that manages cluster-wide administrative operations, such as partition leadership, topic creation, and broker failures.
 
-## Configuration
+## Kafka Configuration
 
-- **Replication Factor**
-- **ISR (In-Sync Replicas)**
-- **Batch Size (`batch.size`)**
-- **Linger Time (`linger.ms`)**
-- **Retention Policies**
-- **Log Segments**
-- **Acknowledgments (`acks`)**
-- **Static Group Membership (`group.instance.id`)**
-- **Cooperative Sticky Rebalance Strategy (`partition.assignment.strategy`, `session.timeout.ms`, `heartbeat.interval.ms`, `unclean.leader.election.enable=false`)**
-- **Log Retention (`log.retention.ms`)**
-- **Log Segment Bytes (`log.segment.bytes`)**
-- **Max In-Flight Requests Per Connection (`max.in.flight.requests.per.connection=1`)**
-- **Compression Type (`compression.type`)**
-- **Enable Idempotence (`enable.idempotence=true`)**
-- **Consumer Fetch Min Bytes (`fetch.min.bytes`)**
-- **Consumer Fetch Max Wait Time (`fetch.max.wait.ms`)**
-- **Kafka Streams Max Poll Records (`max.poll.records`)**
-- **Exactly-Once Processing (EOS) with Transactions (`transactional.id`)**
-- **Auto Commit (`enable.auto.commit=false`)**
-- **Commit Sync (`commitSync`)**
-- **Message Max Bytes on Brokers (`message.max.bytes`)**
-- **Fetch Max Bytes on Consumer (`fetch.max.bytes`)**
+### Producer Configuration
+
+- **acks** – Level of acknowledgment required from brokers before a producer request is considered successful.  
+  *Use Case:* `all` for max reliability, `1` for lower latency.  
+- **batch.size** – Maximum size (in bytes) of a batch of messages sent in one request.  
+  *Use Case:* Increase to improve throughput for high-volume producers.  
+- **linger.ms** – Time to wait before sending a batch to allow more messages to accumulate.  
+  *Use Case:* Small value reduces latency, higher value improves batching.  
+- **compression.type** – Algorithm (e.g., gzip, snappy, lz4) used to compress messages.  
+  *Use Case:* Use snappy for faster compression, gzip for better ratio.  
+- **enable.idempotence=true** – Ensures that messages are delivered exactly once without duplication.  
+  *Use Case:* Required for exactly-once semantics in critical applications.  
+- **max.in.flight.requests.per.connection=1** – Max number of unacknowledged requests per connection.  
+  *Use Case:* Set to 1 with idempotence to prevent message reordering.  
+- **transactional.id** – Enables transactional guarantees for producers.  
+  *Use Case:* Use for exactly-once processing across multiple partitions or topics.  
+- **retries** – Number of times the producer retries sending a message if it fails.  
+  *Use Case:* Set higher for unreliable networks to ensure delivery.  
+- **delivery.timeout.ms** – Maximum time to wait for a message acknowledgment before considering it failed.  
+  *Use Case:* Increase in high-latency networks to prevent unnecessary failures.  
+
+### Consumer Configuration
+
+- **group.instance.id** – Fixed identifier for a consumer to maintain identity across rebalances.  
+  *Use Case:* Use for static group membership to reduce rebalances in long-running consumers.  
+- **enable.auto.commit=false** – Whether the consumer automatically commits offsets.  
+  *Use Case:* Disable for manual, precise offset control in critical processing.  
+- **auto.offset.reset** – Action if no initial offset exists (`earliest` or `latest`).  
+  *Use Case:* `earliest` for batch jobs, `latest` for real-time streaming.  
+- **fetch.min.bytes** – Minimum amount of data the consumer fetches in a request.  
+  *Use Case:* Increase to reduce network calls in high-throughput scenarios.  
+- **fetch.max.wait.ms** – Max wait time to accumulate `fetch.min.bytes`.  
+  *Use Case:* Tune for latency vs throughput trade-off.  
+- **fetch.max.bytes** – Maximum data fetched per request.  
+  *Use Case:* Increase if messages are large to avoid truncation.  
+- **max.poll.records** – Max records returned in a single poll.  
+  *Use Case:* Lower value for low-latency processing, higher for bulk processing.  
+- **session.timeout.ms** – Timeout to detect consumer failures.  
+  *Use Case:* Short for fast failure detection, long for network instability.  
+- **heartbeat.interval.ms** – Interval at which consumer sends heartbeats to the broker.  
+  *Use Case:* Short interval ensures broker knows consumer is alive.  
+- **max.partition.fetch.bytes** – Max data fetched per partition in a request.  
+  *Use Case:* Prevents a single large partition from starving others.  
+
+### Broker Configuration
+
+- **replication.factor** – Number of copies of each partition across brokers.  
+  *Use Case:* Higher value for fault-tolerant production clusters.  
+- **log.retention.ms** – Duration Kafka retains logs before deletion.  
+  *Use Case:* Tune for storage limits and regulatory retention policies.  
+- **log.segment.bytes** – Maximum size of a log segment before rolling over.  
+  *Use Case:* Smaller segments for fast recovery, larger for fewer files.  
+- **log.retention.bytes** – Max total size of logs per partition.  
+  *Use Case:* Use with disk quotas to prevent storage overflow.  
+- **message.max.bytes** – Maximum size of a single message the broker will accept.  
+  *Use Case:* Increase for large messages; match consumer `fetch.max.bytes`.  
+- **unclean.leader.election.enable=false** – Prevents out-of-sync replicas from becoming leader.  
+  *Use Case:* Recommended for high data integrity in production.  
+- **num.partitions** – Default number of partitions for a topic if not specified.  
+  *Use Case:* Set based on expected parallelism and throughput.  
+- **min.insync.replicas** – Minimum number of replicas that must acknowledge a write for success.  
+  *Use Case:* Ensures durability in replicated topics.  
+- **replica.lag.time.max.ms** – Max time a follower can lag before being considered out-of-sync.  
+  *Use Case:* Prevents slow replicas from being chosen as leaders.  
+- **connections.max.idle.ms** – Max idle time for connections before closing.  
+  *Use Case:* Frees resources in low-traffic clusters.  
+- **replica.fetch.max.bytes** – Max bytes a replica can fetch per request from the leader.  
+  *Use Case:* Tune for network bandwidth and large messages.  
+- **log.cleaner.enable** – Enable log compaction.  
+  *Use Case:* Use for topics requiring key-based deduplication (like changelog topics).  
+
+### Miscellaneous / Cluster
+
+- **ISR (In-Sync Replicas)** – Replicas fully caught up with the leader.  
+  *Use Case:* Ensure sufficient replicas for high availability.  
+- **partition.assignment.strategy** – Strategy used for assigning partitions to consumers.  
+  *Use Case:* `cooperative-sticky` minimizes partition movement during rebalances.  
+- **retention.policies** – Rules defining how long Kafka retains messages.  
+  *Use Case:* Configure for regulatory or business requirements.  
+- **leader.imbalance.check.interval.seconds** – Interval for checking partition leader distribution across brokers.  
+  *Use Case:* Helps balance load across brokers automatically.  
+
 
 ## Alerting
 
