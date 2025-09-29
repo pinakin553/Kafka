@@ -263,3 +263,23 @@ Kafka guarantees **in-order delivery per partition**, but failover can cause mes
 - **Partitioning Strategy:**  
   - Keep related messages in the **same partition** to preserve order.  
 
+### Producing and Consuming Messages in Order (Sequential Processing)
+
+Kafka guarantees **in-order delivery per partition**, which can be leveraged for sequential processing of messages.
+
+---
+
+#### Producer Configuration
+
+To ensure messages are produced in order:
+
+```properties
+# Enable idempotence to prevent duplicates on retries
+enable.idempotence=true
+
+# Ensure all replicas acknowledge the message
+acks=all
+
+# Use a single partition (or a key-based partitioning strategy)
+# so that related messages go to the same partition
+
