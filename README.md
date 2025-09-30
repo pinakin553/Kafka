@@ -98,8 +98,43 @@ Apache Kafka is a distributed event streaming platform that follows a publish-su
 - **retention.policies** – Rules defining how long Kafka retains messages.  
   *Use Case:* Configure for regulatory or business requirements.  
 - **leader.imbalance.check.interval.seconds** – Interval for checking partition leader distribution across brokers.  
-  *Use Case:* Helps balance load across brokers automatically.  
+  *Use Case:* Helps balance load across brokers automatically.
+  
+---
 
+## 📌 Key Concepts
+
+### Log End Offset (LEO)
+- The offset of the **next message to be written** on a replica.
+- Example: if last message is at offset `104`, then LEO = `105`.
+
+### High Watermark (HW)
+- The **highest committed offset** that is guaranteed to be replicated to all **in-sync replicas (ISR)**.
+- Consumers can **only read up to HW**, not beyond.
+- HW is determined by the **lowest LEO in the ISR**.
+
+### Low Watermark (LW)
+- The **earliest offset retained** across all replicas (after log cleanup/retention).
+- Used for **deletion of old log segments**.
+- LW is advanced when all replicas have moved past a segment.
+
+---
+
+## 📊 Example Flow
+
+Imagine a topic-partition with replication factor = 3.
+
+```text
+Producer → Leader (writes at Log End Offset, LEO=105)
+↓
+Replicas (Follower-1 at 102, Follower-2 at 105, Leader at 105)
+↓
+Leader HW = 102 (lowest in ISR)
+↓
+Consumers can only fetch up to offset 102
+```
+
+---
 
 ## Alerting
 
